@@ -1329,6 +1329,8 @@ namespace SIPSorcery.SIP.App
             else
             {
                 logger.LogInformation($"Call attempt to {m_uac.CallDescriptor.Uri} received a ringing response {sipResponse.ShortDescription}.");
+                Console.WriteLine("Body: " + sipResponse.Body);
+                MediaSession.SetRemoteDescription(SDP.ParseSDPDescription(sipResponse.Body));
             }
         }
 
@@ -1351,28 +1353,41 @@ namespace SIPSorcery.SIP.App
         /// <param name="sipResponse">The INVITE success response.</param>
         private async void ClientCallAnsweredHandler(ISIPClientUserAgent uac, SIPResponse sipResponse)
         {
+            logger.LogDebug("debug message: " + sipResponse.Body);
             if (sipResponse.StatusCode >= 200 && sipResponse.StatusCode <= 299)
             {
-                // Only set the remote RTP end point if there hasn't already been a packet received on it.
-                var setDescriptionResult = MediaSession.SetRemoteDescription(SDP.ParseSDPDescription(sipResponse.Body));
-
-                if (setDescriptionResult == SetDescriptionResultEnum.OK)
+                if (!sipResponse.Body.IsNullOrBlank())
                 {
-                    await MediaSession.Start().ConfigureAwait(false);
+                    // Only set the remote RTP end point if there hasn't already been a packet received on it.
+                    var setDescriptionResult = MediaSession.SetRemoteDescription(SDP.ParseSDPDescription(sipResponse.Body));
 
-                    m_sipDialogue = uac.SIPDialogue;
-                    m_sipDialogue.DialogueState = SIPDialogueStateEnum.Confirmed;
+                    if (setDescriptionResult == SetDescriptionResultEnum.OK)
+                    {
+                        await MediaSession.Start().ConfigureAwait(false);
 
-                    logger.LogInformation($"Call attempt to {m_uac.CallDescriptor.Uri} was answered.");
+                        m_sipDialogue = uac.SIPDialogue;
+                        m_sipDialogue.DialogueState = SIPDialogueStateEnum.Confirmed;
 
-                    ClientCallAnswered?.Invoke(uac, sipResponse);
+                        logger.LogInformation($"Call attempt to {m_uac.CallDescriptor.Uri} was answered.");
+
+                        ClientCallAnswered?.Invoke(uac, sipResponse);
+                    }
+                    else
+                    {
+                        logger.LogDebug($"Call attempt was answered with {sipResponse.ShortDescription} but an {setDescriptionResult} error occurred setting the remote description.");
+                        ClientCallFailed?.Invoke(uac, $"Failed to set the remote description {setDescriptionResult}", sipResponse);
+                        CallEnded();
+                    }                    
                 }
-                else
-                {
-                    logger.LogDebug($"Call attempt was answered with {sipResponse.ShortDescription} but an {setDescriptionResult} error occurred setting the remote description.");
-                    ClientCallFailed?.Invoke(uac, $"Failed to set the remote description {setDescriptionResult}", sipResponse);
-                    CallEnded();
-                }
+
+                await MediaSession.Start().ConfigureAwait(false);
+
+                m_sipDialogue = uac.SIPDialogue;
+                m_sipDialogue.DialogueState = SIPDialogueStateEnum.Confirmed;
+
+                logger.LogInformation($"Call attempt to {m_uac.CallDescriptor.Uri} was answered.");
+
+                ClientCallAnswered?.Invoke(uac, sipResponse);
             }
             else
             {
